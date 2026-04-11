@@ -1,5 +1,3 @@
-#keeps track of multiple GridEnvs and their associated policies
-#inherit from  GridEnvState
 from state import GridEnvironmentState
 
 

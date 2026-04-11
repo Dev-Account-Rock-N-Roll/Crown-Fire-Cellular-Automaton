@@ -1,24 +1,25 @@
-from state import GridEnvironmentState
+from layers import LayeredGridEnvironmentState
 from rules import WildfireTransitionRule
 
 class WildfireSimulationEngine:
-    """Manages state transitions and rule assignments."""
+    """Manages 3D state transitions and physics rule assignments."""
     
-    def __init__(self, rows: int, columns: int, initial_rule: WildfireTransitionRule):
+    def __init__(self, rows: int, columns: int, num_layers: int, initial_rule: WildfireTransitionRule):
         self.total_rows = rows
         self.total_columns = columns
-        self.current_state = GridEnvironmentState(rows, columns)
+        self.num_layers = num_layers
+        self.current_state = LayeredGridEnvironmentState(rows, columns, num_layers)
         self.active_transition_rule = initial_rule
         self.simulation_turn_count = 0
 
     def advance_one_turn(self):
-        """Applies the current rule to advance the state."""
+        """Applies the current 3D rule to advance the multi-layered state."""
         self.current_state = self.active_transition_rule.calculate_next_state(self.current_state)
         self.simulation_turn_count += 1
 
     def reset_environment(self):
-        """Re-initializes a fresh randomized grid."""
-        self.current_state = GridEnvironmentState(self.total_rows, self.total_columns)
+        """Re-initializes a fresh randomized 3D grid stack."""
+        self.current_state = LayeredGridEnvironmentState(self.total_rows, self.total_columns, self.num_layers)
         self.simulation_turn_count = 0
 
     def swap_transition_rule(self, new_rule: WildfireTransitionRule):
