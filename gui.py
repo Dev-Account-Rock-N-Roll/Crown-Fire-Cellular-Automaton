@@ -11,6 +11,7 @@ class WildfireSimulatorGUI:
     def __init__(self, root_window: tk.Tk, simulation_engine: WildfireSimulationEngine):
         self.root_window = root_window
         self.root_window.title("Wildfire Cellular Automata Simulator")
+        self.root_window.state("zoomed")  # Start maximized for better visibility
         self.simulation = simulation_engine
         
         self.cell_pixel_size = 12

@@ -35,7 +35,7 @@ class ThermodynamicSpreadRule(WildfireTransitionRule):
         diffused_heat = convolve(current_state.heat_levels, self.heat_diffusion_kernel, mode='constant')
         diffused_heat *= self.cooling_retention_rate
         diffused_heat[current_state.is_actively_burning] += self.heat_generated_by_fire
-        next_state.heat_levels = diffused_heat
+        next_state.heat_levels = diffused_heat.clip(0.0, 1.0)
 
         # 2. Moisture evaporates based on local heat
         next_state.moisture_levels -= next_state.heat_levels * self.evaporation_rate
