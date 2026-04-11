@@ -19,6 +19,10 @@ class GridEnvironmentState:
         self.moisture_levels = np.random.uniform(0.2, 0.6, (total_rows, total_columns))
         self.is_actively_burning = np.zeros((total_rows, total_columns), dtype=bool)
 
+        # Wind parameters
+        self.wind_speed = 0.0  # 0-10 scale
+        self.wind_direction = 0.0  # degrees, 0=east, 90=north
+
     def duplicate_state(self) -> 'GridEnvironmentState':
         """Deep copy for synchronous Cellular Automata generation updates."""
         copied_state = GridEnvironmentState(self.total_rows, self.total_columns)
@@ -26,4 +30,6 @@ class GridEnvironmentState:
         copied_state.heat_levels = np.copy(self.heat_levels)
         copied_state.moisture_levels = np.copy(self.moisture_levels)
         copied_state.is_actively_burning = np.copy(self.is_actively_burning)
+        copied_state.wind_speed = self.wind_speed
+        copied_state.wind_direction = self.wind_direction
         return copied_state

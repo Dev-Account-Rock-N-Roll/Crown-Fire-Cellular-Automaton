@@ -27,6 +27,7 @@ class WildfireSimulatorGUI:
         self._setup_keyboard_bindings()
         self._initialize_canvas_grid()
         self.refresh_canvas_colors()
+        self.update_wind()
 
     def _get_layer_offset(self, layer_index: int):
         grid_x = layer_index % self.grid_columns
@@ -66,6 +67,18 @@ class WildfireSimulatorGUI:
         self.env_combobox.pack(side=tk.LEFT, padx=15)
         self.env_combobox.bind("<<ComboboxSelected>>", self.action_change_environment)
 
+        # Wind controls
+        wind_frame = ttk.Frame(self.control_frame)
+        wind_frame.pack(side=tk.LEFT, padx=15)
+        ttk.Label(wind_frame, text="Wind Speed:").pack(side=tk.TOP)
+        self.wind_speed_var = tk.DoubleVar(value=0.0)
+        self.wind_speed_scale = ttk.Scale(wind_frame, from_=0, to=5, orient=tk.HORIZONTAL, variable=self.wind_speed_var, command=self.update_wind)
+        self.wind_speed_scale.pack(side=tk.TOP)
+        ttk.Label(wind_frame, text="Direction (0°=East):").pack(side=tk.TOP)
+        self.wind_dir_var = tk.DoubleVar(value=0.0)
+        self.wind_dir_scale = ttk.Scale(wind_frame, from_=0, to=360, orient=tk.HORIZONTAL, variable=self.wind_dir_var, command=self.update_wind)
+        self.wind_dir_scale.pack(side=tk.TOP)
+
         self.info_container = ttk.Frame(self.control_frame)
         self.info_container.pack(side=tk.RIGHT, fill=tk.X)
 
@@ -76,6 +89,10 @@ class WildfireSimulatorGUI:
         self.rule_string_var = tk.StringVar(value="Rule: ThermodynamicSpreadRule")
         self.rule_label = tk.Label(self.info_container, textvariable=self.rule_string_var, font=("Helvetica", 10))
         self.rule_label.pack(side=tk.TOP, anchor="e")
+
+        self.wind_info_var = tk.StringVar(value="Wind: 0.0 m/s @ 0°")
+        self.wind_label = tk.Label(self.info_container, textvariable=self.wind_info_var, font=("Helvetica", 10))
+        self.wind_label.pack(side=tk.TOP, anchor="e")
 
         self.grid_canvas = tk.Canvas(self.root_window, width=canvas_width, height=canvas_height, bg="#111111")
         self.grid_canvas.pack(side=tk.TOP, padx=10, pady=10)
@@ -199,6 +216,9 @@ class WildfireSimulatorGUI:
         if self.is_auto_playing:
             self.action_toggle_play_pause()
         self.simulation.reset_environment()
+        self.wind_speed_var.set(0.0)
+        self.wind_dir_var.set(0.0)
+        self.update_wind()
         self.refresh_canvas_colors()
 
     def action_toggle_rule(self):
@@ -222,6 +242,11 @@ class WildfireSimulatorGUI:
             
         self.simulation.swap_environment_builder(new_builder)
         self.refresh_canvas_colors()
+
+    def update_wind(self, event=None):
+        self.simulation.current_state.wind_speed = self.wind_speed_var.get()
+        self.simulation.current_state.wind_direction = self.wind_dir_var.get()
+        self.wind_info_var.set(f"Wind: {self.wind_speed_var.get():.1f} m/s @ {self.wind_dir_var.get():.0f}°")
 
     def _execute_automatic_loop(self):
         if self.is_auto_playing:

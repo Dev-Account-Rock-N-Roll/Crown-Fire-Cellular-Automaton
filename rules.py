@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
+import math
 from scipy.ndimage import convolve
 
 from layers import LayeredGridEnvironmentState
@@ -40,6 +41,17 @@ class ThermodynamicSpreadRule(WildfireTransitionRule):
             diffused_heat = convolve(layer.heat_levels, self.heat_diffusion_kernel, mode='constant')
             diffused_heat *= self.cooling_retention_rate
             diffused_heat[layer.is_actively_burning] += self.heat_generated_by_fire
+            
+            # Add wind effect to heat diffusion
+            if current_state.wind_speed > 0:
+                wind_rad = math.radians(current_state.wind_direction)
+                wind_x = current_state.wind_speed * math.cos(wind_rad)
+                wind_y = current_state.wind_speed * math.sin(wind_rad)
+                shift_x = int(round(wind_x))
+                shift_y = int(round(wind_y))
+                if shift_x != 0 or shift_y != 0:
+                    shifted_heat = np.roll(np.roll(layer.heat_levels, shift_x, axis=1), shift_y, axis=0)
+                    diffused_heat += shifted_heat * 0.1 * current_state.wind_speed
             
             if i > 0: 
                 layer_below = current_state.layers[f'layer_{i-1}']
