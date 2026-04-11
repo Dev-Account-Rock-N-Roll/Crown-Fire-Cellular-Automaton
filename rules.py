@@ -27,6 +27,8 @@ class ThermodynamicSpreadRule(WildfireTransitionRule):
         self.downward_heat_transfer = 0.05 
         self.falling_ember_heat = 1.5 
 
+        self.neighbor_kernel = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]]) 
+
     def calculate_next_state(self, current_state: LayeredGridEnvironmentState) -> LayeredGridEnvironmentState:
         next_state = current_state.duplicate_state()
         num_layers = len(current_state.layers)
@@ -53,11 +55,12 @@ class ThermodynamicSpreadRule(WildfireTransitionRule):
         for i in range(num_layers - 1, -1, -1):
             curr_layer = current_state.layers[f'layer_{i}']
             
-            # Embers hit the layer, applying intense heat downward
-            layer_heat_updates[i] += falling_embers * self.falling_ember_heat
-            
             # Embers are 'caught' if there is enough fuel to physically hit
             caught_mask = curr_layer.fuel_levels > 0.1
+            
+            # Embers hit the layer, applying intense heat downward only if caught
+            layer_heat_updates[i] += falling_embers * self.falling_ember_heat * caught_mask.astype(float)
+            
             falling_embers[caught_mask] = 0.0
             
             # New embers spark off actively burning cells
@@ -76,6 +79,18 @@ class ThermodynamicSpreadRule(WildfireTransitionRule):
                                   (next_layer.moisture_levels <= 0.1) & \
                                   (next_layer.fuel_levels > 0.0) & \
                                   (~curr_layer.is_actively_burning)
+            
+            # Add probabilistic ignition based on burning neighbors
+            burning_neighbors = convolve(curr_layer.is_actively_burning.astype(int), self.neighbor_kernel, mode='constant')
+            # Include vertical neighbors
+            if i > 0:
+                burning_neighbors += current_state.layers[f'layer_{i-1}'].is_actively_burning.astype(int)
+            if i < num_layers - 1:
+                burning_neighbors += current_state.layers[f'layer_{i+1}'].is_actively_burning.astype(int)
+            prob = np.clip(burning_neighbors * 0.08, 0, 0.8)
+            random_draw = np.random.random((current_state.total_rows, current_state.total_columns))
+            ignition_vulnerable &= (random_draw < prob)
+            
             next_layer.is_actively_burning[ignition_vulnerable] = True
 
             next_layer.fuel_levels[next_layer.is_actively_burning] -= self.fuel_consumption_rate
