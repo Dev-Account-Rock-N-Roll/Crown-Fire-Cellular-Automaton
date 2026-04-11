@@ -5,13 +5,13 @@ import numpy as np
 
 from engine import WildfireSimulationEngine
 from rules import ThermodynamicSpreadRule, SimpleDiscreteSpreadRule
+from environments import PrairieBuilder, SwampBuilder, ForestBuilder
 
 class WildfireSimulatorGUI:
-    """Handles rendering a packed grid of multiple layers, responsive layout, and clicks."""
-    
+    # ... (__init__ and other untouched internal math logic skipped for brevity if identical, but included in full here)
     def __init__(self, root_window: tk.Tk, simulation_engine: WildfireSimulationEngine):
         self.root_window = root_window
-        self.root_window.title("3D Layered Wildfire Simulator")
+        self.root_window.title("3D Real-World Wildfire Simulator")
         self.simulation = simulation_engine
         
         self.cell_pixel_size = 8
@@ -29,7 +29,6 @@ class WildfireSimulatorGUI:
         self.refresh_canvas_colors()
 
     def _get_layer_offset(self, layer_index: int):
-        """Calculates optimal x/y canvas plotting offsets for tiling layers."""
         grid_x = layer_index % self.grid_columns
         grid_y = layer_index // self.grid_columns
         layer_width = self.simulation.total_columns * self.cell_pixel_size
@@ -40,14 +39,13 @@ class WildfireSimulatorGUI:
         return offset_x, offset_y
 
     def _setup_user_interface(self):
-        """Builds a layout capable of wrapping multiple layers automatically."""
         layer_width = self.simulation.total_columns * self.cell_pixel_size
         layer_height = self.simulation.total_rows * self.cell_pixel_size
         
         canvas_width = self.layer_spacing + self.grid_columns * (layer_width + self.layer_spacing)
         canvas_height = self.layer_spacing + self.grid_rows * (layer_height + self.layer_spacing + 30)
         
-        self.control_frame = tk.Frame(self.root_window, height=80, width=canvas_width, bg="green")
+        self.control_frame = tk.Frame(self.root_window, height=80, width=canvas_width, bg="darkgreen")
         self.control_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, padx=20, pady=15)
 
         self.play_pause_button = ttk.Button(self.control_frame, text="Play (Space)", command=self.action_toggle_play_pause, width=15)
@@ -56,11 +54,17 @@ class WildfireSimulatorGUI:
         self.step_button = ttk.Button(self.control_frame, text="Step (Right Arrow)", command=self.action_step_forward, width=20)
         self.step_button.pack(side=tk.LEFT, padx=5)
 
-        self.reset_button = ttk.Button(self.control_frame, text="Reset Forest", command=self.action_reset_simulation)
+        self.reset_button = ttk.Button(self.control_frame, text="Reset Map", command=self.action_reset_simulation)
         self.reset_button.pack(side=tk.LEFT, padx=5)
         
         self.rule_toggle_button = ttk.Button(self.control_frame, text="Toggle Physics", command=self.action_toggle_rule)
-        self.rule_toggle_button.pack(side=tk.LEFT, padx=20)
+        self.rule_toggle_button.pack(side=tk.LEFT, padx=5)
+        
+        # New Dropdown for Environment Toggling
+        self.env_string_var = tk.StringVar(value="Forest")
+        self.env_combobox = ttk.Combobox(self.control_frame, textvariable=self.env_string_var, values=["Prairie", "Swamp", "Forest"], state="readonly", width=12)
+        self.env_combobox.pack(side=tk.LEFT, padx=15)
+        self.env_combobox.bind("<<ComboboxSelected>>", self.action_change_environment)
 
         self.info_container = ttk.Frame(self.control_frame)
         self.info_container.pack(side=tk.RIGHT, fill=tk.X)
@@ -73,7 +77,7 @@ class WildfireSimulatorGUI:
         self.rule_label = tk.Label(self.info_container, textvariable=self.rule_string_var, font=("Helvetica", 10))
         self.rule_label.pack(side=tk.TOP, anchor="e")
 
-        self.grid_canvas = tk.Canvas(self.root_window, width=canvas_width, height=canvas_height, bg="#222222")
+        self.grid_canvas = tk.Canvas(self.root_window, width=canvas_width, height=canvas_height, bg="#111111")
         self.grid_canvas.pack(side=tk.TOP, padx=10, pady=10)
         self.grid_canvas.bind("<Button-1>", self.handle_canvas_click)
 
@@ -83,7 +87,6 @@ class WildfireSimulatorGUI:
         self.root_window.bind("<Right>", lambda event: self.action_step_forward())
 
     def _initialize_canvas_grid(self):
-        """Pre-allocates dictionaries indexing into multi-layered rectangle arrays."""
         self.canvas_rectangles = {}
         self.current_rendered_colors = {}
         
@@ -112,9 +115,7 @@ class WildfireSimulatorGUI:
                 self.current_rendered_colors[layer_name].append(row_colors)
 
     def refresh_canvas_colors(self):
-        """Translates numerical grid states across all layers into hex colors."""
         state = self.simulation.current_state
-        
         for i in range(self.num_layers):
             layer_name = f'layer_{i}'
             layer_state = state.layers[layer_name]
@@ -126,6 +127,7 @@ class WildfireSimulatorGUI:
             burning_mask = layer_state.is_actively_burning
             alive_mask = (layer_state.fuel_levels > 0.0) & ~burning_mask
             ash_mask = (layer_state.fuel_levels <= 0.0) & ~burning_mask
+            air_mask = (layer_state.fuel_levels == 0.0) & ~burning_mask & ~ash_mask
 
             red_channel[burning_mask] = 1.0
             green_channel[burning_mask] = layer_state.fuel_levels[burning_mask] * 0.7
@@ -134,6 +136,9 @@ class WildfireSimulatorGUI:
             green_channel[alive_mask] = 0.3 + (layer_state.fuel_levels[alive_mask] * 0.7)
             
             red_channel[ash_mask], green_channel[ash_mask], blue_channel[ash_mask] = 0.2, 0.2, 0.2
+            
+            # Pure air (0 fuel generated) should be pure black/background
+            red_channel[air_mask], green_channel[air_mask], blue_channel[air_mask] = 0.0, 0.0, 0.0
 
             red_channel = np.clip(red_channel, 0.0, 1.0)
             green_channel = np.clip(green_channel, 0.0, 1.0)
@@ -150,7 +155,6 @@ class WildfireSimulatorGUI:
         self.rule_string_var.set(f"Rule: {self.simulation.active_transition_rule.__class__.__name__}")
 
     def handle_canvas_click(self, event):
-        """Translates a flattened 2D click into 3D grid space injection."""
         for i in range(self.num_layers):
             offset_x, offset_y = self._get_layer_offset(i)
             layer_width = self.simulation.total_columns * self.cell_pixel_size
@@ -164,11 +168,13 @@ class WildfireSimulatorGUI:
                 
                 layer_name = f'layer_{i}'
                 layer_state = self.simulation.current_state.layers[layer_name]
-                layer_state.heat_levels[row_index, col_index] = 2.0
-                layer_state.moisture_levels[row_index, col_index] = 0.0
-                layer_state.is_actively_burning[row_index, col_index] = True
                 
-                self.refresh_canvas_colors()
+                # Cannot spark thin air
+                if layer_state.fuel_levels[row_index, col_index] > 0.0:
+                    layer_state.heat_levels[row_index, col_index] = 2.0
+                    layer_state.moisture_levels[row_index, col_index] = 0.0
+                    layer_state.is_actively_burning[row_index, col_index] = True
+                    self.refresh_canvas_colors()
                 break
 
     def action_step_backward(self):
@@ -200,6 +206,21 @@ class WildfireSimulatorGUI:
             self.simulation.swap_transition_rule(SimpleDiscreteSpreadRule())
         else:
             self.simulation.swap_transition_rule(ThermodynamicSpreadRule())
+        self.refresh_canvas_colors()
+        
+    def action_change_environment(self, event=None):
+        selection = self.env_string_var.get()
+        if selection == "Prairie":
+            new_builder = PrairieBuilder()
+        elif selection == "Swamp":
+            new_builder = SwampBuilder()
+        else:
+            new_builder = ForestBuilder()
+            
+        if self.is_auto_playing:
+            self.action_toggle_play_pause()
+            
+        self.simulation.swap_environment_builder(new_builder)
         self.refresh_canvas_colors()
 
     def _execute_automatic_loop(self):

@@ -5,17 +5,12 @@ from scipy.ndimage import convolve
 from layers import LayeredGridEnvironmentState
 
 class WildfireTransitionRule(ABC):
-    """Abstract Base Class for 3D CA transition rules (Strategy Pattern)."""
-    
     @abstractmethod
     def calculate_next_state(self, current_state: LayeredGridEnvironmentState) -> LayeredGridEnvironmentState:
-        """Computes the next evolutionary state of the layered 3D grid."""
         pass
 
 
 class ThermodynamicSpreadRule(WildfireTransitionRule):
-    """3D thermodynamic rule modeling intra-layer diffusion and inter-layer heat convection."""
-    
     def __init__(self):
         self.heat_diffusion_kernel = np.array([
             [0.10, 0.20, 0.10],
@@ -28,25 +23,22 @@ class ThermodynamicSpreadRule(WildfireTransitionRule):
         self.evaporation_rate = 0.2           
         self.fuel_consumption_rate = 0.05
         
-        # 3D Specific constants (fire heats upwards intensely, downwards weakly)
         self.upward_heat_transfer = 0.45 
         self.downward_heat_transfer = 0.05 
+        self.falling_ember_heat = 1.5 
 
     def calculate_next_state(self, current_state: LayeredGridEnvironmentState) -> LayeredGridEnvironmentState:
         next_state = current_state.duplicate_state()
         num_layers = len(current_state.layers)
-
         layer_heat_updates = []
 
-        # Step 1: Pre-calculate heat diffusion across all 3D layers safely
+        # Step 1: Pre-calculate local heat diffusion and standard rising convection
         for i in range(num_layers):
             layer = current_state.layers[f'layer_{i}']
-            
             diffused_heat = convolve(layer.heat_levels, self.heat_diffusion_kernel, mode='constant')
             diffused_heat *= self.cooling_retention_rate
             diffused_heat[layer.is_actively_burning] += self.heat_generated_by_fire
             
-            # Convection interactions with 3D neighbors
             if i > 0: 
                 layer_below = current_state.layers[f'layer_{i-1}']
                 diffused_heat += layer_below.heat_levels * self.upward_heat_transfer
@@ -56,13 +48,27 @@ class ThermodynamicSpreadRule(WildfireTransitionRule):
                 
             layer_heat_updates.append(diffused_heat)
 
-        # Step 2: Apply thermodynamic phase transitions simultaneously
+        # Step 2: Simulate Gravity & Sparks. Embers drop and bypass empty space.
+        falling_embers = np.zeros((current_state.total_rows, current_state.total_columns))
+        for i in range(num_layers - 1, -1, -1):
+            curr_layer = current_state.layers[f'layer_{i}']
+            
+            # Embers hit the layer, applying intense heat downward
+            layer_heat_updates[i] += falling_embers * self.falling_ember_heat
+            
+            # Embers are 'caught' if there is enough fuel to physically hit
+            caught_mask = curr_layer.fuel_levels > 0.1
+            falling_embers[caught_mask] = 0.0
+            
+            # New embers spark off actively burning cells
+            falling_embers += curr_layer.is_actively_burning.astype(float)
+
+        # Step 3: Apply thermodynamic phase transitions simultaneously
         for i in range(num_layers):
             curr_layer = current_state.layers[f'layer_{i}']
             next_layer = next_state.layers[f'layer_{i}']
             
             next_layer.heat_levels = layer_heat_updates[i]
-
             next_layer.moisture_levels -= next_layer.heat_levels * self.evaporation_rate
             next_layer.moisture_levels = np.clip(next_layer.moisture_levels, 0.0, 1.0)
 
@@ -81,8 +87,6 @@ class ThermodynamicSpreadRule(WildfireTransitionRule):
 
 
 class SimpleDiscreteSpreadRule(WildfireTransitionRule):
-    """3D discrete rule checking adjacent cellular neighbors across x, y, and z axes."""
-    
     def __init__(self):
         self.neighbor_kernel = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]])
 
@@ -90,23 +94,21 @@ class SimpleDiscreteSpreadRule(WildfireTransitionRule):
         next_state = current_state.duplicate_state()
         num_layers = len(current_state.layers)
         
-        for i in range(num_layers):
+        # Track falling sparks cascading down the layers
+        falling_sparks = np.zeros((current_state.total_rows, current_state.total_columns), dtype=int)
+        
+        for i in range(num_layers - 1, -1, -1):
             curr_layer = current_state.layers[f'layer_{i}']
             next_layer = next_state.layers[f'layer_{i}']
             
-            burning_neighbors = convolve(
-                curr_layer.is_actively_burning.astype(int), 
-                self.neighbor_kernel, 
-                mode='constant'
-            )
+            burning_neighbors = convolve(curr_layer.is_actively_burning.astype(int), self.neighbor_kernel, mode='constant')
             
-            # Fire climbs up easily (weight 2), falls downwards poorly (weight 1)
             if i > 0: 
                 burning_below = current_state.layers[f'layer_{i-1}'].is_actively_burning
                 burning_neighbors += burning_below.astype(int) * 2 
-            if i < num_layers - 1: 
-                burning_above = current_state.layers[f'layer_{i+1}'].is_actively_burning
-                burning_neighbors += burning_above.astype(int) * 1 
+            
+            # Massive infectious multiplier for falling sparks
+            burning_neighbors += falling_sparks * 4 
                 
             vulnerable_to_fire = (burning_neighbors >= 1) & \
                                  (next_layer.fuel_levels > 0.0) & \
@@ -118,5 +120,10 @@ class SimpleDiscreteSpreadRule(WildfireTransitionRule):
             depleted_mask = next_layer.fuel_levels <= 0.0
             next_layer.is_actively_burning[depleted_mask] = False
             next_layer.fuel_levels = np.clip(next_layer.fuel_levels, 0.0, 1.0)
+
+            # Resolve sparks passing through air vs hitting objects
+            caught_mask = curr_layer.fuel_levels > 0.0
+            falling_sparks[caught_mask] = 0
+            falling_sparks += curr_layer.is_actively_burning.astype(int)
 
         return next_state
