@@ -12,6 +12,7 @@ class WildfireSimulatorGUI:
     def __init__(self, root_window: tk.Tk, simulation_engine: WildfireSimulationEngine):
         self.root_window = root_window
         self.root_window.title("3D Real-World Wildfire Simulator")
+        self.root_window.state("zoomed")
         self.simulation = simulation_engine
         
         self.cell_pixel_size = 8
@@ -51,6 +52,9 @@ class WildfireSimulatorGUI:
 
         self.play_pause_button = ttk.Button(self.control_frame, text="Play (Space)", command=self.action_toggle_play_pause, width=15)
         self.play_pause_button.pack(side=tk.LEFT, padx=5)
+
+        self.back_button = ttk.Button(self.control_frame, text="Back (Left Arrow)", command=self.action_step_backward, width=18)
+        self.back_button.pack(side=tk.LEFT, padx=5)
 
         self.step_button = ttk.Button(self.control_frame, text="Step (Right Arrow)", command=self.action_step_forward, width=20)
         self.step_button.pack(side=tk.LEFT, padx=5)
@@ -195,7 +199,10 @@ class WildfireSimulatorGUI:
                 break
 
     def action_step_backward(self):
-        pass 
+        if self.is_auto_playing:
+            self.action_toggle_play_pause()
+        if self.simulation.step_back():
+            self.refresh_canvas_colors() 
 
     def action_step_forward(self):
         if self.is_auto_playing:

@@ -10,17 +10,27 @@ class WildfireSimulationEngine:
         self.env_builder = initial_builder
         self.active_transition_rule = initial_rule
         self.simulation_turn_count = 0
+        self.state_history = []
         
         self.reset_environment()
 
     def advance_one_turn(self):
+        self.state_history.append(self.current_state.duplicate_state())
         self.current_state = self.active_transition_rule.calculate_next_state(self.current_state)
         self.simulation_turn_count += 1
+
+    def step_back(self):
+        if self.state_history:
+            self.current_state = self.state_history.pop()
+            self.simulation_turn_count -= 1
+            return True
+        return False
 
     def reset_environment(self):
         """Generates a fresh state using the current environmental builder."""
         self.current_state = self.env_builder.build(self.total_rows, self.total_columns, self.num_layers)
         self.simulation_turn_count = 0
+        self.state_history = []
 
     def swap_transition_rule(self, new_rule: WildfireTransitionRule):
         self.active_transition_rule = new_rule
