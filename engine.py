@@ -2,6 +2,8 @@ from layers import LayeredGridEnvironmentState
 from rules import WildfireTransitionRule
 from environments import EnvironmentBuilder
 
+import numpy as np
+
 class WildfireSimulationEngine:
     def __init__(self, rows: int, columns: int, num_layers: int, initial_rule: WildfireTransitionRule, initial_builder: EnvironmentBuilder):
         self.total_rows = rows
@@ -38,3 +40,9 @@ class WildfireSimulationEngine:
     def swap_environment_builder(self, new_builder: EnvironmentBuilder):
         self.env_builder = new_builder
         self.reset_environment()
+    def ignite_random_fire(self, count: int):
+        for _ in range(count):
+            layer_idx = np.random.randint(0, self.num_layers)
+            row_idx = np.random.randint(0, self.total_rows)
+            col_idx = np.random.randint(0, self.total_columns)
+            self.current_state.layers[f'layer_{layer_idx}'].is_actively_burning[row_idx, col_idx] = True
