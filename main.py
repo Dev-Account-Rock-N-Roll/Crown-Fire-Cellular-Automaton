@@ -3,7 +3,7 @@ import argparse
 import unittest
 import tkinter as tk
 
-from rules import ThermodynamicSpreadRule
+from rules import AlexandridisWildfireRule
 from environments import ForestBuilder
 from engine import WildfireSimulationEngine
 from gui import WildfireSimulatorGUI
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     else:
         main_window = tk.Tk()
         
-        physics_rule = ThermodynamicSpreadRule()
+        physics_rule = AlexandridisWildfireRule()
         initial_environment = ForestBuilder()
         
         # 30 Rows, 40 Columns mapped across 4 distinct Altitude Layers

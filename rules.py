@@ -15,35 +15,23 @@ class WildfireTransitionRule(ABC):
 class AlexandridisWildfireRule(WildfireTransitionRule):
     """
     Wildfire spread modeling based on Alexandridis et al. (2011).
-    Uses a stochastic cellular automaton to predict fire front evolution.
-    
-    Includes thermodynamic factors:
-    - Wind field and velocity
-    - Ground slope and elevation
-    - Vegetation type, height, and density
-    - Fuel moisture
-    - Spotting phenomena (flying pop-corn-like embers)
     """
 
     def __init__(self, cell_resolution: float = 5.0):
-        # Physical size of each grid cell side (in meters)
         self.cell_resolution = cell_resolution
         
-        # Operational parameters configured per Table 4 from the paper
-        self.base_spread_prob = 0.60       # P_0
-        self.slope_coefficient = 0.063     # a_s
-        self.moisture_coeff_a = 3.258      # a
-        self.moisture_coeff_b = 0.111      # b
-        self.height_power_law = 0.932      # d
-        self.wind_coeff_1 = 0.045          # c_1
-        self.wind_coeff_2 = 0.191          # c_2
+        self.base_spread_prob = 0.60       
+        self.slope_coefficient = 0.063     
+        self.moisture_coeff_a = 3.258      
+        self.moisture_coeff_b = 0.111      
+        self.height_power_law = 0.932      
+        self.wind_coeff_1 = 0.045          
+        self.wind_coeff_2 = 0.191          
         
-        # Spotting effect parameters (Rule 5)
-        self.spotting_lambda = 0.2         # Average pinecones emitted per burning cell
-        self.spotting_base_prob = 0.1      # Base probability that a landed spot fire ignites
-        self.spotting_mean_thrust = 15.0   # Base metric thrust scalar for the log-normal throw
+        self.spotting_lambda = 0.2         
+        self.spotting_base_prob = 0.1      
+        self.spotting_mean_thrust = 15.0   
         
-        # Surrounding Moore neighborhood directions: (row_delta, col_delta)
         self.neighborhood_directions = [
             (-1, -1), (-1, 0), (-1, 1),
             (0, -1),           (0, 1),
@@ -51,10 +39,37 @@ class AlexandridisWildfireRule(WildfireTransitionRule):
         ]
 
     @staticmethod
+    def _to_2d_grid(data, expected_shape: tuple) -> np.ndarray:
+        """
+        Defensively converts scalars, lists, flat arrays, or None into 
+        a proper 2D NumPy array of the required shape.
+        """
+        if data is None:
+            return np.zeros(expected_shape)
+            
+        if np.isscalar(data):
+            fill = float(np.asarray(data).item())
+            return np.full(expected_shape, fill)
+            
+        arr = np.asarray(data)
+        
+        if arr.ndim == 0:
+            return np.full(expected_shape, arr.item())
+            
+        if arr.shape == expected_shape:
+            return arr
+            
+        # If passed a flat list/array, reshape it properly
+        if arr.size == expected_shape[0] * expected_shape[1]:
+            return arr.reshape(expected_shape)
+            
+        # Last resort: Broadcast if dimensions allow (e.g. applying a 1D profile across rows)
+        return np.broadcast_to(arr, expected_shape).copy()
+
+    @staticmethod
     def _shift_grid(matrix: np.ndarray, row_shift: int, col_shift: int, fill_value: float = 0.0) -> np.ndarray:
         """
         Shifts a 2D matrix by a given row and column delta.
-        Fills the undefined boundary areas cleanly with `fill_value` without wrapping around.
         """
         rows, cols = matrix.shape
         shifted_matrix = np.full((rows, cols), fill_value, dtype=matrix.dtype)
@@ -79,32 +94,38 @@ class AlexandridisWildfireRule(WildfireTransitionRule):
         wind_velocity = current_state.wind_speed
         wind_angle_rad = math.radians(current_state.wind_direction)
         
+        rows, cols = current_state.total_rows, current_state.total_columns
+        shape = (rows, cols)
+        
         for layer_key, current_layer in current_state.layers.items():
             next_layer = next_state.layers[layer_key]
-            rows, cols = current_state.total_rows, current_state.total_columns
             
-            # Retrieve specialized topological properties (fallback to defaults if standard layer)
-            elevation = getattr(current_layer, 'elevation', np.zeros((rows, cols)))
-            veg_type_prob = getattr(current_layer, 'p_veg', np.zeros((rows, cols)))
-            veg_density_prob = getattr(current_layer, 'p_den', np.zeros((rows, cols)))
-            veg_height = getattr(current_layer, 'veg_height', np.ones((rows, cols)))
+            # 1. Defensively coerce ALL layer properties into 2D NumPy arrays
+            #    This fixes errors related to lists not having `.shape` or failing on boolean indexing.
+            elevation = self._to_2d_grid(getattr(current_layer, 'elevation', 0.0), shape)
+            veg_type_prob = self._to_2d_grid(getattr(current_layer, 'p_veg', 0.0), shape)
+            veg_density_prob = self._to_2d_grid(getattr(current_layer, 'p_den', 0.0), shape)
+            veg_height = self._to_2d_grid(getattr(current_layer, 'veg_height', 1.0), shape)
             
-            # Equation 3: Moisture Effect (Cm is percentage 0 to 100)
-            moisture_percentage = current_layer.moisture_levels * 100.0
+            moisture_levels = self._to_2d_grid(current_layer.moisture_levels, shape)
+            fuel_levels = self._to_2d_grid(current_layer.fuel_levels, shape)
+            is_actively_burning = self._to_2d_grid(current_layer.is_actively_burning, shape).astype(bool)
+            
+            # Apply identical coercion to the next_layer arrays to support in-place masking
+            next_layer.fuel_levels = self._to_2d_grid(next_layer.fuel_levels, shape)
+            next_layer.is_actively_burning = self._to_2d_grid(next_layer.is_actively_burning, shape).astype(bool)
+
+            # Equation 3: Moisture Effect
+            moisture_percentage = moisture_levels * 100.0
             prob_moisture = self.moisture_coeff_a * np.exp(-self.moisture_coeff_b * moisture_percentage)
             
             # Equation 4: Vegetation Height Effect
             prob_height = veg_height ** self.height_power_law
             
-            # Tracking the probability that a vulnerable cell avoids ignition from ALL its neighbors
-            prob_avoids_ignition = np.ones((rows, cols))
+            prob_avoids_ignition = np.ones(shape)
             
-            # Assess spread from every direction in the Moore neighborhood
             for row_delta, col_delta in self.neighborhood_directions:
-                # Euclidean distance between cell centers
                 travel_distance = self.cell_resolution * (math.sqrt(2) if row_delta != 0 and col_delta != 0 else 1.0)
-                
-                # Cartesian vector mapped from grid shifts (row increases downwards, thus -row_delta)
                 dx, dy = col_delta, -row_delta
                 propagation_angle = math.atan2(dy, dx)
                 
@@ -114,9 +135,8 @@ class AlexandridisWildfireRule(WildfireTransitionRule):
                 prob_wind = math.exp(self.wind_coeff_1 * wind_velocity) * \
                             math.exp(wind_velocity * self.wind_coeff_2 * wind_directional_term)
                 
-                # Identify which neighbors in this specific direction are actively burning
                 burning_neighbor_mask = self._shift_grid(
-                    current_layer.is_actively_burning, 
+                    is_actively_burning, 
                     row_delta, col_delta, 
                     fill_value=False
                 )
@@ -126,39 +146,37 @@ class AlexandridisWildfireRule(WildfireTransitionRule):
                 slope_angle_rad = np.arctan((elevation - neighbor_elevation) / travel_distance)
                 prob_slope = np.exp(self.slope_coefficient * np.degrees(slope_angle_rad))
                 
-                # Equation 1: Comprehensive Probability of local fire transmission
+                # Equation 1: Comprehensive Probability
                 prob_burn = self.base_spread_prob * (1 + veg_type_prob) * (1 + veg_density_prob) * \
                             prob_wind * prob_slope * prob_moisture * prob_height
                 
                 prob_burn = np.clip(prob_burn, 0.0, 1.0)
-                
-                # Accumulate the survival sequence: Cell must survive exposure from this specific neighbor
                 prob_avoids_ignition *= (1.0 - (prob_burn * burning_neighbor_mask.astype(float)))
             
-            # Calculate aggregate transmission and resolve probabilistic ignitions
             prob_ignition = 1.0 - prob_avoids_ignition
-            random_draws = np.random.random((rows, cols))
+            random_draws = np.random.random(shape)
             
-            # Rule 1 & 2: Empty cells cannot ignite. Vulnerable cells catch fire based on aggregated probability
-            vulnerable_cells = (~current_layer.is_actively_burning) & (current_layer.fuel_levels > 0.0)
+            vulnerable_cells = (~is_actively_burning) & (fuel_levels > 0.0)
             ignitions = vulnerable_cells & (random_draws < prob_ignition)
             
-            # Rule 3 & 4: Burning cells consume all fuel in one discrete timestep and die out
-            next_layer.fuel_levels[current_layer.is_actively_burning] = 0.0
-            next_layer.is_actively_burning[current_layer.is_actively_burning] = False
+            # Consume fuel and extinguish current fires
+            next_layer.fuel_levels[is_actively_burning] = 0.0
+            next_layer.is_actively_burning[is_actively_burning] = False
             
+            # Ignite new fires
             next_layer.is_actively_burning[ignitions] = True
 
-            # Rule 5: Spotting Mechanism Implementation (Pinecone Embers)
-            self._apply_spotting_mechanics(current_layer, next_layer, wind_velocity, wind_angle_rad)
+            self._apply_spotting_mechanics(
+                is_actively_burning, 
+                next_layer, 
+                wind_velocity, 
+                wind_angle_rad
+            )
             
         return next_state
 
-    def _apply_spotting_mechanics(self, current_layer, next_layer, wind_velocity: float, wind_angle_rad: float):
-        """
-        Calculates and applies the long-distance spotting jumps simulating flying pinecones.
-        """
-        burning_indices = np.argwhere(current_layer.is_actively_burning)
+    def _apply_spotting_mechanics(self, is_actively_burning: np.ndarray, next_layer, wind_velocity: float, wind_angle_rad: float):
+        burning_indices = np.argwhere(is_actively_burning)
         if len(burning_indices) == 0 or self.spotting_lambda <= 0:
             return
             
@@ -166,32 +184,25 @@ class AlexandridisWildfireRule(WildfireTransitionRule):
         
         for (row_idx, col_idx), emission_count in zip(burning_indices, pinecone_counts):
             for _ in range(emission_count):
-                # Pinecone ejects in a uniform random angle relative to the primary wind vector
                 relative_eject_angle = np.random.uniform(0, 2 * math.pi)
                 absolute_flight_angle = wind_angle_rad + relative_eject_angle
                 
-                # Equation 9: Distance traveled by the pinecone based on wind carrying it
                 base_thrust = abs(np.random.normal(loc=self.spotting_mean_thrust, scale=5.0))
                 wind_assistance = math.exp(wind_velocity * self.wind_coeff_2 * (math.cos(relative_eject_angle) - 1))
                 travel_distance = base_thrust * wind_assistance
                 
-                # Calculate landing coordinate indices (scaled to cells)
                 dx = (travel_distance * math.cos(absolute_flight_angle)) / self.cell_resolution
                 dy = (travel_distance * math.sin(absolute_flight_angle)) / self.cell_resolution
                 
                 target_row = int(row_idx - dy) 
                 target_col = int(col_idx + dx)
                 
-                if 0 <= target_row < current_layer.is_actively_burning.shape[0] and \
-                   0 <= target_col < current_layer.is_actively_burning.shape[1]:
+                if 0 <= target_row < is_actively_burning.shape[0] and \
+                   0 <= target_col < is_actively_burning.shape[1]:
                     
-                    # Ensure destination has fuel and isn't already burning
-                    if next_layer.fuel_levels[target_row, target_col] > 0 and not current_layer.is_actively_burning[target_row, target_col]:
-                        # Check stochastic success of the brand establishing a firebed
+                    if next_layer.fuel_levels[target_row, target_col] > 0 and not is_actively_burning[target_row, target_col]:
                         if np.random.random() < self.spotting_base_prob:
                             next_layer.is_actively_burning[target_row, target_col] = True
-
-
 
 class ThermodynamicSpreadRule(WildfireTransitionRule):
     def __init__(self):
