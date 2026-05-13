@@ -24,7 +24,7 @@ if __name__ == "__main__":
         initial_environment = ForestBuilder()
         
         # 30 Rows, 40 Columns mapped across 4 distinct Altitude Layers
-        engine = WildfireSimulationEngine(30, 40, 4, physics_rule, initial_environment)
+        engine = WildfireSimulationEngine(30, 40, 2, physics_rule, initial_environment)
         gui = WildfireSimulatorGUI(main_window, engine)
         
         main_window.focus_force() 

@@ -23,6 +23,13 @@ class GridEnvironmentState:
         self.wind_speed = 0.0  # 0-10 scale
         self.wind_direction = 0.0  # degrees, 0=east, 90=north
 
+        # Alexandridis parameters
+
+        self.elevation = 0.0
+        self.p_veg = 0.0
+        self.p_den = 0.0
+        self.veg_height = 0.0
+
     def duplicate_state(self) -> 'GridEnvironmentState':
         """Deep copy for synchronous Cellular Automata generation updates."""
         copied_state = GridEnvironmentState(self.total_rows, self.total_columns)
